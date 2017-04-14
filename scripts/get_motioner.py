@@ -20,7 +20,7 @@ match = re.findall('href="([a-z./]+mot[0-9\-]+\.text\.zip)',
                    str(content))
 
 print("Getting archives")
-for zip_url in match:
+for zip_url in match[:1]:
     print("\thttp:" + zip_url)
     zip_content = requests.get("http:" + zip_url).content
 
