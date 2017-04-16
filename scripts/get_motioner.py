@@ -8,10 +8,6 @@ from io import BytesIO, StringIO
 
 from riksmot import DATA_PATH
 
-
-if not os.path.isdir(DATA_PATH):
-    os.mkdir(DATA_PATH)
-
 print("Dowloading motioner into:\n\t{}".format(DATA_PATH))
 
 riksdag_doc_url = "http://data.riksdagen.se/data/dokument/"

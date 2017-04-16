@@ -1,103 +1,155 @@
-from riksmot import DATA_PATH
+from riksmot import DATA_PATH, NET_PATH
 
+import signal
+import sys
 import numpy as np
-import os
-import pickle
-import matplotlib.pyplot as plt
-from contextlib import redirect_stdout
+from os import listdir
+from os.path import join
 
 import tensorflow as tf
 import keras
-tf.python.control_flow_ops = tf
 
 from keras.utils import np_utils
-from keras.models import Sequential, Model, load_model
-from keras.optimizers import SGD, adam
-from keras.callbacks import ModelCheckpoint, EarlyStopping
+from keras.models import Sequential, load_model
+from keras.callbacks import Callback
+from keras.layers import Dense, LSTM
 
-from keras.layers import Input
-from keras.layers import Dense, Dropout, Activation
-from keras.layers import Embedding, LSTM, Input
 
-SEQ_LEN=10
-MAX_FILES=10
+SEQ_LEN = 15
+STEP = 1
+FILES_PER_BATCH = 5
 
-unique_chars = set()
-for filename in os.listdir(DATA_PATH)[:MAX_FILES]:
-    with open(os.path.join(DATA_PATH, filename), 'r') as f:
-        unique_chars |= set(f.read().lower())
+chars = [chr(i) for i in range(ord('a'), ord('z')+1)] + \
+        ['å', 'ä', 'ö', '.', ',', ' ']#, '(', ')', '\n']
+n_chars = len(chars)
 
-char_to_int = {c: i for i, c in enumerate(unique_chars)}
+char_to_int = {c: i for i, c in enumerate(chars)}
 int_to_char = {v: k for k,v in char_to_int.items()}
 
-def get_data():
 
+def make_dir_batcher(sub_dir):
+    """
+    Returns a generator and the number of files in
+    the given sub-directory, i.e. "items in epoch".
+    The generator is infinite and returns X and Y
+    for one file at a time.
+    """
+    # Prepare a shuffle
+    filenames = listdir(join(DATA_PATH, sub_dir))
+    indexes = np.arange(len(filenames))
+    def dir_batcher():
+        while True:
+            np.random.shuffle(indexes)
+            for filename in (filenames[i] for i in indexes):
+                file_path = join(DATA_PATH, sub_dir, filename)
+                yield data_from_file(file_path)
+    return dir_batcher(), len(filenames)
+
+
+def data_from_file(file_path):
     X = []
     y = []
-    for filename in os.listdir(DATA_PATH)[:MAX_FILES]:
+    with open(file_path, 'r') as f:
+        text = f.read().lower()
+    digits = [char_to_int[c] for c in text if c in chars]
 
-        with open(os.path.join(DATA_PATH, filename), 'r') as f:
-            text = f.read().lower()
-        digits = [char_to_int[c] for c in text if ord(c)]
+    X, y = [], []
+    for i in range(0, len(digits) - SEQ_LEN, STEP):
+        X.append(digits[i:i+SEQ_LEN])
+        y.append(digits[i+SEQ_LEN])
 
-        for i in range(0, len(digits) - SEQ_LEN):
-            X.append(digits[i:i+SEQ_LEN])
-            y.append(digits[i+SEQ_LEN])
     X = np.array(X)
     y = np.array(y)
-    return X, y
+
+    return to_one_hot(X), to_one_hot(y)
 
 
-def build_rnn(input_shape, n_classes):
+def to_one_hot(data):
+    shape = data.shape
+    data = np_utils.to_categorical(data, nb_classes=n_chars)
+    return np.reshape(data, shape + (n_chars,))
+
+
+def build_rnn(input_shape):
     model = Sequential()
-    model.add(LSTM(64, input_shape=input_shape))
-    #model.add(LSTM(32, return_sequences=True))
-    #model.add(LSTM(32))
+    model.add(LSTM(128, return_sequences=True,
+                   input_shape=input_shape))
+    model.add(LSTM(128, return_sequences=True))
+    model.add(LSTM(128))
 
-    model.add(Dense(n_classes, activation='softmax'))
+    model.add(Dense(n_chars, activation='softmax'))
+
+    model.compile(loss='categorical_crossentropy',
+                  optimizer='rmsprop')
 
     return model
 
-def gen_text(model, seed, mu, sigma):
-    length = 100
-    ints = np.zeros(length, dtype=seed.dtype)
-    ints[:len(seed)] = np.squeeze(seed)
 
-    for i in range(0, length - SEQ_LEN):
-        x = ints[i:i+SEQ_LEN].reshape((1, -1, 1)).astype(np.float)
-        x -= mu
-        x /= sigma
-        pred = model.predict(x)
-        ints[i + SEQ_LEN] = np.argmax(pred)
+class Writer(Callback):
+
+    def __init__(self, seed):
+        self.seed = seed
+
+    def on_epoch_end(self, epoch, logs={}):
+        print('\nSeed:{}|'.format("-"*(SEQ_LEN-6)))
+        print(gen_text(self.model, self.seed))
+        print()
+        return
+
+
+def gen_text(model, seed):
+    length = 1000
+    ints = np.zeros(length, dtype=seed.dtype)
+    ints[:len(seed)] = np.argmax(seed, axis=1)
+
+    seed = np.expand_dims(seed, 0)
+    for i in range(SEQ_LEN, length):
+
+        pred = model.predict(seed)
+        choice = np.random.multinomial(1, pred[-1], 1)
+        ints[i] = np.argmax(choice)
+        seed = np.vstack((seed, [np.r_[seed[-1][1:], choice]]))
+
     return "".join(int_to_char[i] for i in ints)
+
 
 def main():
 
-    epochs = 10
+    X, Y = data_from_file(join(DATA_PATH, "strindberg.txt"))
 
-    X, y = get_data()
-    n_seeds = 5
-    seeds = X[np.random.randint(0, len(X), n_seeds)]
+    seed_text = "det var en gång"
+    seed = to_one_hot(np.array([char_to_int[c] for c in seed_text]))
+    #seed = X[np.random.randint(0, len(X))]
 
-    X = np.expand_dims(X, -1).astype(np.float)
-    Y = np_utils.to_categorical(y)
+    model = build_rnn(X[0].shape)
 
-    mu = X.mean(axis=0)
-    sigma = X.std(axis=0)
-
-    X -= mu
-    X /= sigma
-
-    model = build_rnn(X[0].shape, Y.shape[1])
-
-    model.compile(loss='categorical_crossentropy', optimizer='adam')
-    model.fit(X, Y, nb_epoch=epochs, batch_size=128, verbose=2)
+    epoch = 0
+    while keep_going:
+        model.fit(X, Y, nb_epoch=epoch+1, batch_size=1024,
+                  callbacks=[Writer(seed)],
+                  initial_epoch = epoch,
+                  shuffle=False, verbose=1)
+        epoch += 1
 
 
-    for seed in seeds:
-        print(gen_text(model, seed, mu, sigma))
+    model.save(join(NET_PATH,
+                    "rnn_seq_{}.hdf5".format(SEQ_LEN)))
+
+    return model
+
+
+def stop_training(signum, frame):
+    # Restore original SIGINTE so that further C-c does their job.
+    signal.signal(signal.SIGINT, original_sigint)
+
+    global keep_going
+    keep_going = False
+
 
 if __name__ == '__main__':
-    main()
-    import gc
-    gc.collect()
+    keep_going = True
+
+    original_sigint = signal.getsignal(signal.SIGINT)
+    signal.signal(signal.SIGINT, stop_training)
+
+    model = main()
