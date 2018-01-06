@@ -6,7 +6,7 @@ import re
 from zipfile import ZipFile
 from io import BytesIO, StringIO
 
-from riksmot import DATA_PATH
+DATA_PATH = os.path.join("..", "data")
 
 print("Dowloading motioner into:\n\t{}".format(DATA_PATH))
 
