@@ -97,7 +97,12 @@ class Writer(Callback):
         return
 
 
-def gen_text(model, seed):
+def temper(p, temperature):
+    p = np.log(p) / temperature
+    return np.exp(p) / np.sum(np.exp(p))
+
+
+def gen_text(model, seed, temperature=1.0):
     length = 1000
     ints = np.zeros(length, dtype=seed.dtype)
     ints[:len(seed)] = np.argmax(seed, axis=1)
@@ -106,6 +111,7 @@ def gen_text(model, seed):
     for i in range(SEQ_LEN, length):
 
         pred = model.predict(seed)
+        prep = temper(pred, temperature)
         choice = np.random.multinomial(1, pred[-1], 1)
         ints[i] = np.argmax(choice)
         seed = np.vstack((seed, [np.r_[seed[-1][1:], choice]]))
