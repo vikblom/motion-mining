@@ -1,8 +1,9 @@
-from riksmot import DATA_PATH, NET_PATH
+#!/usr/bin/env python3
 
 import signal
 import sys
 import numpy as np
+import os
 from os import listdir
 from os.path import join
 
@@ -13,6 +14,15 @@ from keras.utils import np_utils
 from keras.models import Sequential, load_model
 from keras.callbacks import Callback
 from keras.layers import Dense, LSTM
+
+
+DATA_PATH = os.path.join("..", "data")
+if not os.path.isdir(DATA_PATH):
+    os.mkdir(DATA_PATH)
+
+NET_PATH = os.path.join("..", "networks")
+if not os.path.isdir(NET_PATH):
+    os.mkdir(NET_PATH)
 
 
 SEQ_LEN = 15
@@ -66,7 +76,7 @@ def data_from_file(file_path):
 
 def to_one_hot(data):
     shape = data.shape
-    data = np_utils.to_categorical(data, nb_classes=n_chars)
+    data = np_utils.to_categorical(data, n_chars)
     return np.reshape(data, shape + (n_chars,))
 
 
@@ -131,10 +141,12 @@ def main():
 
     epoch = 0
     while keep_going:
-        model.fit(X, Y, nb_epoch=epoch+1, batch_size=1024,
-                  callbacks=[Writer(seed)],
+        model.fit(X, Y, batch_size=1024,
+                  callbacks=[Writer(seed)], # Print example
                   initial_epoch = epoch,
-                  shuffle=False, verbose=1)
+                  epochs=epoch+1,
+                  shuffle=False,
+                  verbose=1)
         epoch += 1
 
 
@@ -145,7 +157,7 @@ def main():
 
 
 def stop_training(signum, frame):
-    # Restore original SIGINTE so that further C-c does their job.
+    # Restore original SIGINTE so that further C-c's does their job.
     signal.signal(signal.SIGINT, original_sigint)
 
     global keep_going
